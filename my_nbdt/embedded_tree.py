@@ -6,6 +6,7 @@ import tensorflow as tf
 from tensorflow.keras import Sequential, Model
 from tensorflow.keras.layers import Dense, Input
 
+
 """
 The embedded decision tree in a NBDT. This is the tree that the featurized
 data point is fed through to provide explanations for a data point.
@@ -108,7 +109,7 @@ class EmbeddedTree():
         node1 = None
         node2 = None
 
-        print('TREE CONSTRUCTION')
+        #print('TREE CONSTRUCTION')
         while q.qsize() != 1:
             node1 = q.get()
             node2 = q.get()
@@ -130,7 +131,7 @@ class EmbeddedTree():
 
 
 
-
+"""
 # TEST
 model_inputs = Input(shape=(10,))
 z = Dense(20, activation='relu')(model_inputs)
@@ -149,3 +150,4 @@ print(EmbeddedTree(model.get_weights()[4], model).soft_inf(x_tree))
 print('NET PREDICTION')
 #print('NET PREDICTION')
 print(model(x_net))
+"""
