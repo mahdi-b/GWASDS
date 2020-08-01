@@ -70,6 +70,16 @@ class TreeNode():
 
 
     """
+    A measure of similarity between two nodes. Similarity is the dot product 
+    between the node weights.
+    """
+    # TODO offer different types of similarity measures
+    def similarity(self, node, type='dot'):
+        return dot(self.weight, node.weight)
+
+
+
+    """
     Use weights of node to make a prediction given x. The prediction is 
     the inner product between x and the node weights.
 

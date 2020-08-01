@@ -64,9 +64,8 @@ class EmbeddedTree():
         try:
             assert sum(prediction) <= 1.0
         except AssertionError:
-
             print('Softmax does not sum to 1: ', sum(prediction))
-            return
+            
 
         return tf.convert_to_tensor([prediction])
 
@@ -89,49 +88,63 @@ class EmbeddedTree():
 
 
     """
+    Function for agglomeritive clustering from leaf nodes
+    """
+    def __cluster(self, nodes):
+        clusters = [] + nodes
+
+        while len(clusters) > 1:
+            print('NUMBER OF CLUSTERS: ', len(clusters))
+            curr_node = clusters.pop()
+            print(clusters)
+            max_sim = curr_node.similarity(clusters[0])
+            best_node = clusters[0]
+            for i in range(len(clusters)):
+                score = curr_node.similarity(clusters[i])
+                if score > max_sim:
+                    max_sim = score
+                    best_node = clusters[i]
+
+            parent_weights = (curr_node.weight + best_node.weight) / 2.0
+            parent_node = TreeNode(weights=parent_weights, 
+                                   right_child=curr_node, 
+                                   left_child=best_node,
+                                   class_idx=None,
+                                   )
+
+            clusters.append(parent_node)
+            clusters.remove(best_node)
+
+        
+        return clusters[0]
+
+
+
+
+    """
     Private function to build decision tree in weight space.
 
     Arguments:
     weights (numpy array): Last FC layer weights of neural net.
     """
-    # TODO consider an odd number of leaves (maybe not)
     def __build_tree(self, weights):
         
-        q = SimpleQueue()
+        leaves = []
         w = weights.T
         for i in range(0, len(w)):
-            q.put( TreeNode(weights=w[i], 
-                            right_child=None, 
-                            left_child=None,
-                            class_idx=i, 
-                            ) )
+            leaves.append(TreeNode(weights=w[i], 
+                          right_child=None, 
+                          left_child=None,
+                          class_idx=i, 
+                        ) )
 
-        node1 = None
-        node2 = None
-
-        #print('TREE CONSTRUCTION')
-        while q.qsize() != 1:
-            node1 = q.get()
-            node2 = q.get()
-            parent_weights = (node1.weight + node2.weight) / 2.0
-            parent_node = TreeNode(weights=parent_weights, 
-                                   right_child=node1, 
-                                   left_child=node2,
-                                   class_idx=None,
-                                   )
-
-            q.put(parent_node)
-
-        root_node = q.get()
-        root_node.right = node1
-        root_node.left = node2
-        
-        return root_node
+        # Clustering here TODO
+        tree = self.__cluster(leaves)
+        return tree
 
 
 
 
-"""
 # TEST
 model_inputs = Input(shape=(10,))
 z = Dense(20, activation='relu')(model_inputs)
@@ -139,6 +152,7 @@ z = Dense(20, activation='relu')(z)
 out = Dense(10, activation='softmax', name='output')(z)
 model = Model(inputs=model_inputs, outputs=out)
 
+"""
 #print(binary_model.get_weights())
 #print('WEIGHTS: ', binary_model.get_weights()[2])
 x_tree = np.random.rand(1, 20)
@@ -151,3 +165,9 @@ print('NET PREDICTION')
 #print('NET PREDICTION')
 print(model(x_net))
 """
+
+root = EmbeddedTree(model.get_weights()[4], model).tree
+
+leaves = []
+root.get_leaves(root, leaves)
+print(len(leaves))
