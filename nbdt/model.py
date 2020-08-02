@@ -8,8 +8,6 @@ import numpy as np
 import pandas as pd
 from loss import TreeSupLoss
 
-# TODO implement training procedure with loss defined in paper
-# TODO implement backpropgation procedure for training
 # TODO Check batching 
 # TODO Test on CIFAR10
 # TODO Test on SNP data
@@ -76,20 +74,22 @@ class NBDT():
 
 
     def compute_loss(self, x, y):
-        return TreeSupLoss(tf.keras.losses.CategoricalCrossentropy(), 1.0)(y, 
+        return TreeSupLoss(tf.keras.losses.CategoricalCrossentropy(), 10.0).call(y, 
                                                                            self.network_predictions(x),
                                                                            self.nbdt_predict(x),
                                                                            )
+
 
     """
     Function for computing the gradient of the NBDT with the given loss function (loss_fn)
     """
     def gradient(self, xs, ys, loss_fn):
         with tf.GradientTape() as tape:
-            tape.watch(self.backbone.trainable_variables)
+            #tape.watch(self.backbone.variables)
+            #tape.watch(self.model.variables)
             loss_value = self.compute_loss(xs, ys)
-            #loss_value = loss_fn(ys, self.network_predictions(xs), self.nbdt_predict(xs))
-        return loss_value, tape.gradient(loss_value, [self.backbone.trainable_variables])
+            #print(loss_value)
+        return loss_value, tape.gradient(loss_value, [self.backbone.variables, self.model.variables])
 
 
 
@@ -113,27 +113,32 @@ class NBDT():
                 # update the neural network parameters
 
         training_loss_results = []
-        training_accuracy_results = []
         tree_loss = TreeSupLoss(loss_function, tree_loss_weight)
         
         for epoch in range(epochs):
             epoch_loss_avg = tf.keras.metrics.Mean()
-            epoch_acc = tf.keras.metrics.SparseCategoricalAccuracy()
 
+            count = 0
+            total_samples = 0
             for x, y in dataset:
-                loss, grad = self.gradient(x, y, tree_loss)
-                opt.apply_gradients(zip(grad, self.model.trainable_variables))
+                total_samples = total_samples + 1
+                loss, grad = self.gradient(x, y, tree_loss) 
+                opt.apply_gradients(zip(grad[0], self.backbone.variables))
+                opt.apply_gradients(zip(grad[1], self.model.variables))
                 epoch_loss_avg.update_state(loss)
-                epoch_acc.update_state(y, self.nbdt_predict(x))
+                pred = np.zeros((2,)).astype('uint8')
+                pred[np.argmax(self.nbdt_predict(x))] = 1
+                
+                if np.argmax(y.numpy()[0]) == np.argmax(pred):
+                    count = count + 1
 
             training_loss_results.append(epoch_loss_avg.result())
-            training_accuracy_results.append(epoch_acc.result())
 
-            #if epoch % 20 == 0:
             print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(epoch,
                                                                 epoch_loss_avg.result(),
-                                                                epoch_acc.result()))
-        
+                                                                count / total_samples))
+
+
 
 
 # TEST
@@ -141,27 +146,32 @@ class NBDT():
 model_inputs = tf.keras.layers.Input(shape=(10,))
 z = tf.keras.layers.Dense(20, activation='relu')(model_inputs)
 z = tf.keras.layers.Dense(20, activation='relu')(z)
-out = tf.keras.layers.Dense(10, activation='softmax', name='output')(z)
+out = tf.keras.layers.Dense(2, activation='softmax', name='output')(z)
 model = tf.keras.Model(inputs=model_inputs, outputs=out)
 
+opt = tf.keras.optimizers.Adam(learning_rate=0.0001)
+
+model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['acc'])
 
 # DEFINE DATASET
 snps = pd.read_csv('fake_test_data.csv')
-case = snps[snps.Type == 'CASE'].sample(n=1)
-control = snps[snps.Type == 'CONTROL'].sample(n=1)
+case = snps[snps.Type == 'CASE'].sample(n=100)
+control = snps[snps.Type == 'CONTROL'].sample(n=100)
 dataset = pd.concat([case, control], axis=0)
-pheno = tf.data.Dataset.from_tensor_slices(pd.get_dummies(dataset.Type).values)
-geno = tf.data.Dataset.from_tensor_slices(dataset[dataset.columns[1:-1]].values)
-
-geno_pheno = tf.data.Dataset.zip((geno, pheno)) # test dataset
+dataset = dataset.sample(frac=1.0)
+pheno = pd.get_dummies(dataset.Type).values
+geno = dataset[dataset.columns[1:-1]].values
+geno_pheno = tf.data.Dataset.from_tensor_slices((geno, pheno)) # test dataset
+model.fit(geno, pheno, batch_size=20, epochs=100)
 
 # DEFINE NBDT
 nbdt = NBDT(model)
+loss_fn = tf.keras.losses.CategoricalCrossentropy()
 nbdt.train_network(dataset=geno_pheno.batch(1), 
-                   loss_function=tf.keras.losses.CategoricalCrossentropy(), 
+                   loss_function=loss_fn, 
                    epochs=10, 
-                   tree_loss_weight=1.0, 
-                   opt=tf.keras.optimizers.Adam(),
+                   tree_loss_weight=10.0, 
+                   opt=tf.keras.optimizers.Adam(learning_rate=0.00001),
                    )
 
 
