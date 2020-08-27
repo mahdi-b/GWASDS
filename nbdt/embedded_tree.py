@@ -11,7 +11,7 @@ from tensorflow.keras.layers import Dense, Input
 The embedded decision tree in a NBDT. This is the tree that the featurized
 data point is fed through to provide explanations for a data point.
 """
-class EmbeddedTree():
+class EmbeddedTree:
 
     """
     Constructor builds the decision tree in weight space.
@@ -22,6 +22,7 @@ class EmbeddedTree():
     def __init__(self, weight_matrix, neural_net):
         self.neural_backbone = Model(inputs=neural_net.input, 
                                      outputs=neural_net.layers[len(neural_net.layers)-2].output)
+        print(self.neural_backbone.summary())
         self.tree = self.__build_tree(weight_matrix)
     
 
@@ -51,26 +52,23 @@ class EmbeddedTree():
             else:
                 curr = curr.right
 
-        print(curr.class_idx)
         return curr.class_idx
 
 
-
+    # TODO comments
     def soft_inf(self, x):
         self.__soft_inference(x, 1.0, self.tree)
         prediction = []
         self.tree.get_leaf_probs(self.tree, prediction)
-        
-        try:
-            assert sum(prediction) <= 1.0
-        except AssertionError:
-            print('Softmax does not sum to 1: ', sum(prediction))
-            
-
-        return tf.convert_to_tensor([prediction])
+        #print(prediction)
+        prediction = sorted(prediction, key=lambda x: x[0])
+        prediction = [x[1] for x in prediction]
+        #print('PREDICTION: ', prediction)
+        #print(sum(prediction))
+        return tf.convert_to_tensor(prediction, dtype=tf.float32)
 
 
-
+    # TODO comments
     def __soft_inference(self, x, parent_prob, node):
         if node.is_leaf():
             return
@@ -80,6 +78,7 @@ class EmbeddedTree():
         # set path probabilities of each child
         node.right.path_prob = softmax_dist[1] * parent_prob
         node.left.path_prob = softmax_dist[0] * parent_prob
+        #print(node.weight)
 
         # recursive call on subtrees
         self.__soft_inference(x, node.right.path_prob, node=node.right)
@@ -94,30 +93,32 @@ class EmbeddedTree():
         clusters = [] + nodes
 
         while len(clusters) > 1:
-            print('NUMBER OF CLUSTERS: ', len(clusters))
-            curr_node = clusters.pop()
-            print(clusters)
-            max_sim = curr_node.similarity(clusters[0])
-            best_node = clusters[0]
+            #print(len(clusters))
+            best_sim = clusters[0].similarity(clusters[1])
+            node1 = clusters[0]
+            node2 = clusters[1]
             for i in range(len(clusters)):
-                score = curr_node.similarity(clusters[i])
-                if score > max_sim:
-                    max_sim = score
-                    best_node = clusters[i]
-
-            parent_weights = (curr_node.weight + best_node.weight) / 2.0
-            parent_node = TreeNode(weights=parent_weights, 
-                                   right_child=curr_node, 
-                                   left_child=best_node,
+                for j in range(len(clusters)):
+                    if i == j: continue
+                    sim_i_j = clusters[i].similarity(clusters[j])
+                    #print(sim_i_j)
+                    if sim_i_j < best_sim:
+                        #print('UPDATING BEST SIMILARITY')
+                        best_sim = sim_i_j
+                        node1 = clusters[i]
+                        node2 = clusters[j]
+            
+            parent_weights = (node1.weight + node2.weight) / 2.0
+            parent_node = TreeNode(weights=parent_weights,
+                                   right_child=node1,
+                                   left_child=node2,
                                    class_idx=None,
                                    )
-
             clusters.append(parent_node)
-            clusters.remove(best_node)
+            clusters.remove(node1)
+            clusters.remove(node2)
 
-        
         return clusters[0]
-
 
 
 
@@ -130,15 +131,14 @@ class EmbeddedTree():
     def __build_tree(self, weights):
         
         leaves = []
-        w = weights.T
-        for i in range(0, len(w)):
-            leaves.append(TreeNode(weights=w[i], 
+        w = weights
+        for i in range(0, w.shape[1]):
+            leaves.append(TreeNode(weights=w[:, i], 
                           right_child=None, 
                           left_child=None,
                           class_idx=i, 
                         ) )
 
-        # Clustering here TODO
         tree = self.__cluster(leaves)
         return tree
 
@@ -146,13 +146,14 @@ class EmbeddedTree():
 
 
 # TEST
+"""
 model_inputs = Input(shape=(10,))
 z = Dense(20, activation='relu')(model_inputs)
 z = Dense(20, activation='relu')(z)
 out = Dense(10, activation='softmax', name='output')(z)
 model = Model(inputs=model_inputs, outputs=out)
 
-"""
+
 #print(binary_model.get_weights())
 #print('WEIGHTS: ', binary_model.get_weights()[2])
 x_tree = np.random.rand(1, 20)
@@ -164,10 +165,11 @@ print(EmbeddedTree(model.get_weights()[4], model).soft_inf(x_tree))
 print('NET PREDICTION')
 #print('NET PREDICTION')
 print(model(x_net))
-"""
+
 
 root = EmbeddedTree(model.get_weights()[4], model).tree
 
 leaves = []
 root.get_leaves(root, leaves)
 print(len(leaves))
+"""

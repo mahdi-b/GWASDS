@@ -10,9 +10,10 @@ from numpy import dot, concatenate
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.activations import softmax
+from numpy import sqrt
 
 
-class TreeNode():
+class TreeNode:
     
     """
     TreeNode constructor. Each TreeNode should have a vector of weights along with a left and right child.
@@ -50,9 +51,13 @@ class TreeNode():
         self.get_leaves(node.right, leaves)
         self.get_leaves(node.left, leaves)
     
+    
+    """
+    TODO
+    """
     def get_leaf_probs(self, node, leaves):
         if node.is_leaf():
-            leaves.append(node.path_prob)
+            leaves.append((node.class_idx, node.path_prob))
             return
 
         self.get_leaf_probs(node.right, leaves)
@@ -75,7 +80,9 @@ class TreeNode():
     """
     # TODO offer different types of similarity measures
     def similarity(self, node, type='dot'):
-        return dot(self.weight, node.weight)
+        diff_sq = (self.weight - node.weight)
+        return abs(sum(diff_sq))
+        #return dot(self.weight, node.weight)
 
 
 
