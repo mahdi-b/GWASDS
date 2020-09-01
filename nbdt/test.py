@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.cluster import AgglomerativeClustering
 
 
 # TODO check heirarchy construction
@@ -238,17 +239,36 @@ def simulated_snp_test_multi(filename):
     nbdt.evaluate(test_dataset.batch(1), size=x_te.shape[0])
 
 
+def clustering_test(filename):
+    print('reading in data')
+    data = pd.read_csv('noisy_snp_multi_30.csv')
+    data = data[data.columns[1:]]
+    X = data.drop(['Type'], axis=1).values
+    print('build cluster model')
+    agglo_cl = AgglomerativeClustering(n_clusters=5, compute_full_tree=False)
+    print('fitting')
+    agglo_cl.fit(X)
+    print()
+    print('done')
+    print(agglo_cl.labels_)    
+
+
 # ---------------------- TESTS -----------------------
 #simulated_snp_test()
-simulated_snp_test_multi('noisy_snp_multi_30.csv')
+#simulated_snp_test_multi('noisy_snp_multi_30.csv')
 #cifar_test()
 #mnist_test()
 # 
-"""
-clusters = [1, 2, 3]
-print(len(clusters))
-other = clusters
-clusters.pop()
-print(len(clusters))
-print(len(other))
-"""
+
+# CLUSTER TEST
+print('reading in data')
+data = pd.read_csv('noisy_snp_multi_30.csv')
+data = data[data.columns[1:]]
+X = data.drop(['Type'], axis=1).values
+print('build cluster model')
+agglo_cl = AgglomerativeClustering(n_clusters=5, compute_full_tree=False)
+print('fitting')
+agglo_cl.fit(X)
+print()
+print('done')
+print(agglo_cl.labels_)

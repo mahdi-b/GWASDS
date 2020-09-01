@@ -82,7 +82,6 @@ class TreeNode:
     def similarity(self, node, type='dot'):
         diff_sq = (self.weight - node.weight)
         return abs(sum(diff_sq))
-        #return dot(self.weight, node.weight)
 
 
 
