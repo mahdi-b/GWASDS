@@ -10,7 +10,7 @@ from numpy import dot, concatenate
 from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.activations import softmax
-from numpy import sqrt
+from numpy import sqrt, dot
 
 
 class TreeNode:
@@ -51,7 +51,23 @@ class TreeNode:
         self.get_leaves(node.right, leaves)
         self.get_leaves(node.left, leaves)
     
-    
+
+
+    """
+    TODO
+    """
+    def get_leaves_clusters(self, node, leaves):
+        if node == None:
+            return
+        if node.is_leaf():
+            leaves.append(node)
+            return
+        
+        self.get_leaves_clusters(node.left, leaves)
+        self.get_leaves_clusters(node.right, leaves)
+
+
+
     """
     TODO
     """
@@ -78,11 +94,14 @@ class TreeNode:
     A measure of similarity between two nodes. Similarity is the dot product 
     between the node weights.
     """
-    # TODO offer different types of similarity measures
-    def similarity(self, node, type='dot'):
-        diff_sq = (self.weight - node.weight)
-        return abs(sum(diff_sq))
-
+    # TODO CHANGE THIS TO WARD CLUSTERING
+    def similarity(self, node, d_type='euclidean'):
+        sim = 0
+        if d_type == 'euclidean':
+            diff_sq = (self.weight - node.weight)
+            diff_sq = dot(diff_sq, diff_sq)
+            sim = sqrt(diff_sq)
+        return sim
 
 
     """

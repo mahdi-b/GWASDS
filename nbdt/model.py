@@ -28,30 +28,27 @@ class NBDT:
     def __init__(self, model):
 
         # this is the full neural network
-        #print('NET')
         self.model = model
-        #print(self.model.summary())
-        # self.neural_backbone = ... cut out last layer
-        self.backbone = Sequential(model.layers[:-1])
-        #print('BACKBONE')
-        #print(self.backbone.summary())
 
-        # build tree from weights
-        # TODO might need to consider attribute length
-        #print(model.layers[-1].weights[0])
+        # self.neural_backbone = ... cut out last layer
+        self.backbone = Sequential(self.model.layers[:-1])
+
+        # build tree from last layer weights
         self.tree = EmbeddedTree(model.layers[-1].weights[0].numpy(), model)
 
 
 
+    def get_clusters(self):
+        return self.tree.get_clusters()
+
+    def get_weights(self):
+        return self.model.layers[-1].weights[0].numpy()
 
     """
     Use whole network to make prediciton on inputs x
     """
     def network_predictions(self, x):
-        #if len(x.shape) == 3:
-         #   return self.model(x.numpy().reshape(1, *x.shape))
         pred = self.model(x)
-        #print('NET PREDICTION: ', pred)
         return pred
 
 
@@ -68,7 +65,6 @@ class NBDT:
     def nbdt_predict(self, x):
         featurized_sample = self.featurize(x)
         tree_prediction = self.tree.soft_inf(featurized_sample)
-        #print('TREE PRED: ', tree_prediction)
         return tree_prediction
         
 
@@ -88,11 +84,11 @@ class NBDT:
     """
     TODO comments
     """
-    def compute_loss(self, x, y, weight):
-        return TreeSupLoss(tf.keras.losses.CategoricalCrossentropy(), weight).call(y, 
-                                                                           self.network_predictions(x),
-                                                                           self.nbdt_predict(x),
-                                                                           )
+    def compute_loss(self, x, y, weight, loss_fn):
+        return TreeSupLoss(loss_fn, weight).call(y, 
+                                                 self.network_predictions(x),
+                                                 self.nbdt_predict(x),
+                                                )
 
 
     """
@@ -100,8 +96,11 @@ class NBDT:
     """
     def gradient(self, xs, ys, loss_fn, weight):
         with tf.GradientTape() as tape:
-            loss_value = self.compute_loss(xs, ys, weight)
-        return loss_value, tape.gradient(loss_value, [self.backbone.variables, self.model.variables])
+            nbdt_loss, net_loss, loss_value = self.compute_loss(xs, ys, weight, loss_fn)
+        return nbdt_loss, net_loss, loss_value, tape.gradient(loss_value, [#self.backbone.variables, 
+                                                                          self.model.trainable_variables,
+                                                                          ],
+                                                             )
 
 
 
@@ -113,8 +112,7 @@ class NBDT:
     TODO docstring for arguments
     TODO include number of classes
     """
-    def train_network(self, dataset, loss_function, epochs, tree_loss_weight, opt, size):
-        # On every weight update, reconstruct the tree from the last layer weights.
+    def train_network(self, dataset, test_data, test_data_size, loss_function, epochs, tree_loss_weight, opt, size):
         # Inference has to be done on the original network and the full NBDT
         # The network should be pretrained on the dataset of interest
 
@@ -126,31 +124,49 @@ class NBDT:
                 # update the neural network parameters
 
         training_loss_results = []
-        tree_loss = TreeSupLoss(loss_function, tree_loss_weight)
-        
+        #tree_loss = TreeSupLoss(loss_function, tree_loss_weight)
+        self.model.layers[-1].trainable = False
         for epoch in range(epochs):
 
             epoch_loss_avg = tf.keras.metrics.Mean()
+            epoch_nbdt_loss_avg = tf.keras.metrics.Mean()
+            epoch_net_loss_avg = tf.keras.metrics.Mean()
             epoch_acc_avg = tf.keras.metrics.CategoricalAccuracy()
 
             i = 0
             progress = Progbar(target=size)
-            for x, y in dataset:
+            for x, y in dataset.take(size).batch(1):
                 i = i + 1
-                #progress.update(i)
                 sample = x 
-                loss, grad = self.gradient(sample, y, tree_loss, tree_loss_weight)
-                opt.apply_gradients(zip(grad[1], self.model.variables))
+                nbdt_loss, net_loss, loss, grad = self.gradient(sample, y, loss_function, tree_loss_weight)
+                opt.apply_gradients(zip(grad[0], self.model.trainable_variables))
+                self.backbone = Sequential(self.model.layers[:-1])
                 epoch_loss_avg.update_state(loss)
+                epoch_nbdt_loss_avg.update_state(nbdt_loss)
+                epoch_net_loss_avg.update_state(net_loss)
                 nbdt_pred = self.nbdt_predict(sample)
                 epoch_acc_avg.update_state(y, nbdt_pred)
-                progress.update(i, values=[('loss:', epoch_loss_avg.result()), ('acc:', epoch_acc_avg.result())])
+                progress.update(i, values=[('nbdt_loss:', epoch_nbdt_loss_avg.result()),
+                                            ('net_loss:', epoch_net_loss_avg.result()),
+                                            ('loss:', epoch_loss_avg.result()),
+                                            ('acc:', epoch_acc_avg.result()),
+                                        ])
                
             training_loss_results.append(epoch_loss_avg.result().numpy())
+            print()
             print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(epoch,
                                                                 epoch_loss_avg.result(),
                                                                 epoch_acc_avg.result()),
                                                                 )
+
+            if epoch_acc_avg.result() >= .90:
+                test_acc = self.evaluate(test_data.batch(1), size=test_data_size)
+                if test_acc >= .90:
+                    print("SAVING MODEL")
+                    self.model.save("nn_nbdt_test_acc-{:.3f}_epoch-{:03d}_adam".format(test_acc, epoch))
+
+            print()
+            self.model.save("nn_nbdt_epoch-{:03d}_adam".format(epoch))
 
         return training_loss_results
 
@@ -163,24 +179,9 @@ class NBDT:
         acc_avg = tf.keras.metrics.CategoricalAccuracy()
 
         for x, y in dataset:
-            #progress.update(total_samples)
-            #sample = x 
             total_samples = total_samples + 1
             acc_avg.update_state(y, self.nbdt_predict(x))
             progress.update(total_samples, values=[('acc: ', acc_avg.result())])
-            #pred = np.zeros((y.shape[1],)).astype('uint8')
-            #pred[np.argmax(self.nbdt_predict(sample))] = 1 
-            #print('PRED: ' + str(np.argmax(pred)) + ' ------ ' + ' TRUE: ' + str(np.argmax(y)))
-            #if np.argmax(y) == np.argmax(pred):
-             #   count = count + 1
-            
-            
-            #training_loss_results.append(epoch_loss_avg.result().numpy())
         print("Accuracy: {:.3%}".format(acc_avg.result()))
+        return acc_avg.result()
                                                                 
-
-
-
-# TODO test on simulated SNP data
-# TODO test on multi class SNP data (cancer)
-# TODO test on CIFAR10 Dataset

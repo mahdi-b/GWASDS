@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Sequential, Model
 from tensorflow.keras.layers import Dense, Input
+from sklearn.cluster import ward_tree
 
 
 """
@@ -22,10 +23,9 @@ class EmbeddedTree:
     def __init__(self, weight_matrix, neural_net):
         self.neural_backbone = Model(inputs=neural_net.input, 
                                      outputs=neural_net.layers[len(neural_net.layers)-2].output)
-        print(self.neural_backbone.summary())
+        #print(self.neural_backbone.summary())
         self.tree = self.__build_tree(weight_matrix)
     
-
 
     """
     Make a prediction for x.
@@ -93,17 +93,15 @@ class EmbeddedTree:
         clusters = [] + nodes
 
         while len(clusters) > 1:
-            #print(len(clusters))
+
             best_sim = clusters[0].similarity(clusters[1])
             node1 = clusters[0]
             node2 = clusters[1]
+
             for i in range(len(clusters)):
-                for j in range(len(clusters)):
-                    if i == j: continue
+                for j in range(i+1, len(clusters)):
                     sim_i_j = clusters[i].similarity(clusters[j])
-                    #print(sim_i_j)
                     if sim_i_j < best_sim:
-                        #print('UPDATING BEST SIMILARITY')
                         best_sim = sim_i_j
                         node1 = clusters[i]
                         node2 = clusters[j]
@@ -130,46 +128,50 @@ class EmbeddedTree:
     """
     def __build_tree(self, weights):
         
-        leaves = []
-        w = weights
-        for i in range(0, w.shape[1]):
-            leaves.append(TreeNode(weights=w[:, i], 
-                          right_child=None, 
-                          left_child=None,
-                          class_idx=i, 
-                        ) )
+        # get clusters with ward_tree function
+        pairs = ward_tree(weights.T)[0]
+        w = weights.T
+        n_samples = weights.T.shape[0]
+        tree_nodes = {}
 
-        tree = self.__cluster(leaves)
-        return tree
+        idx = 0
+        for pair in pairs:
+            w_list = []
+            children = []
+            for el in pair:
+                if el < n_samples:
+                    tree_nodes[el] = TreeNode(weights=w[el],
+                                              right_child=None,
+                                              left_child=None,
+                                              class_idx=el,
+                                              )
+                    w_list.append(w[el])
+                else:
+                    w_list.append(tree_nodes[el].weight)
 
-
-
-
-# TEST
-"""
-model_inputs = Input(shape=(10,))
-z = Dense(20, activation='relu')(model_inputs)
-z = Dense(20, activation='relu')(z)
-out = Dense(10, activation='softmax', name='output')(z)
-model = Model(inputs=model_inputs, outputs=out)
-
-
-#print(binary_model.get_weights())
-#print('WEIGHTS: ', binary_model.get_weights()[2])
-x_tree = np.random.rand(1, 20)
-x_net = np.random.rand(1,10)
-print(model.layers)
-print('TREE PREDICTION SOFTMAX')
-print(model.get_weights()[4].T.shape)
-print(EmbeddedTree(model.get_weights()[4], model).soft_inf(x_tree))
-print('NET PREDICTION')
-#print('NET PREDICTION')
-print(model(x_net))
+                children.append(el)
+            
+            tree_nodes[idx + n_samples] = TreeNode(weights = (w_list[0] + w_list[1])/2.0,
+                                                   right_child=tree_nodes[children[1]],
+                                                   left_child=tree_nodes[children[0]],
+                                                   class_idx=None,
+                                                   )
+            idx += 1
+        return tree_nodes[idx + n_samples - 1]
 
 
-root = EmbeddedTree(model.get_weights()[4], model).tree
+    # TODO COMMENTS
+    def get_clusters(self):
+        c1 = []
+        c2 = []
+        self.tree.get_leaves_clusters(self.tree.left, c1)
+        self.tree.get_leaves_clusters(self.tree.right, c2)
+        
+        cluster_1 = [node.class_idx for node in c1]
+        cluster_2 = [node.class_idx for node in c2]
+        return cluster_1, cluster_2
 
-leaves = []
-root.get_leaves(root, leaves)
-print(len(leaves))
-"""
+
+
+        
+
