@@ -9,9 +9,7 @@ import numpy as np
 import pandas as pd
 from loss import TreeSupLoss
 
-# TODO Check batching 
-# TODO Test on CIFAR10
-# TODO Test on SNP data
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 
 """
 Neural-Backed Decision Tree from Alvin et al. 2020
@@ -62,9 +60,9 @@ class NBDT:
     Returns
     tree_prediction (tf.Tensor array): The prediction of the NBDT as a softmax distribution.
     """
-    def nbdt_predict(self, x):
+    def nbdt_predict(self, x, interpret=False, background=None, sample=None, shaps=None):
         featurized_sample = self.featurize(x)
-        tree_prediction = self.tree.soft_inf(featurized_sample)
+        tree_prediction = self.tree.soft_inf(featurized_sample, interpret, background, sample, shaps=shaps)
         return tree_prediction
         
 
@@ -112,7 +110,7 @@ class NBDT:
     TODO docstring for arguments
     TODO include number of classes
     """
-    def train_network(self, dataset, test_data, test_data_size, loss_function, epochs, tree_loss_weight, opt, size):
+    def train_network(self, dataset, test_data, test_data_size, loss_function, epochs, tree_loss_weight, opt, size, interpret=False):
         # Inference has to be done on the original network and the full NBDT
         # The network should be pretrained on the dataset of interest
 
@@ -144,7 +142,7 @@ class NBDT:
                 epoch_loss_avg.update_state(loss)
                 epoch_nbdt_loss_avg.update_state(nbdt_loss)
                 epoch_net_loss_avg.update_state(net_loss)
-                nbdt_pred = self.nbdt_predict(sample)
+                nbdt_pred = self.nbdt_predict(sample, interpret)
                 epoch_acc_avg.update_state(y, nbdt_pred)
                 progress.update(i, values=[('nbdt_loss:', epoch_nbdt_loss_avg.result()),
                                             ('net_loss:', epoch_net_loss_avg.result()),
@@ -172,16 +170,52 @@ class NBDT:
 
 
 
-    def evaluate(self, dataset, size):
+    def evaluate(self, dataset, size, interpret=False, background=None, sample=None):
         count = 0
         total_samples = 0
         progress = Progbar(target=size)
         acc_avg = tf.keras.metrics.CategoricalAccuracy()
+        auc_avg = tf.keras.metrics.AUC()
 
         for x, y in dataset:
             total_samples = total_samples + 1
-            acc_avg.update_state(y, self.nbdt_predict(x))
-            progress.update(total_samples, values=[('acc: ', acc_avg.result())])
+            nbdt_pred = self.nbdt_predict(x, interpret, background, sample)
+            acc_avg.update_state(y, nbdt_pred)
+            auc_avg.update_state(y, nbdt_pred.numpy().reshape((1, nbdt_pred.numpy().shape[0])))
+            progress.update(total_samples, values=[('acc: ', acc_avg.result()), ('AUC: ', auc_avg.result())])
         print("Accuracy: {:.3%}".format(acc_avg.result()))
-        return acc_avg.result()
+        print("AUC: {:.3%}".format(auc_avg.result()))
+        return acc_avg.result(), auc_avg.result()
+
+
+    def explain(self, background, samples, filename):
+        print("Running DeepLIFT on each node...")
+        print("getting shapley values for prediction paths...")
+        pred_i = 0
+        progress = Progbar(target=samples.shape[0])
+        shaps = []
+        for sample in samples:
+            progress.update(pred_i)
+            #print()
+            x = sample.reshape((1, samples.shape[1]))
+            #print("Prediction ", pred_i, ": ")
+            pred = self.nbdt_predict(x, interpret=True, background=background, sample=x, shaps=shaps)
+            #print("NBDT OUTPUT: ", np.argmax(pred))
+            pred_i += 1
+        
+        shaps = np.array(shaps)
+        mean_shaps = np.sum(shaps, axis=0) / shaps.shape[0]
+        #mean_shaps = shaps / (pred_i)
+        mean_abs_shaps = abs(mean_shaps)
+        print(mean_abs_shaps)
+        df = pd.DataFrame(mean_abs_shaps)
+        df.columns = ['SNP_' + str(i) for i in range(mean_abs_shaps.shape[1])]
+        if filename != None:
+            df.to_csv(filename)
+        return df
+
+        #print(shaps.shape)
+        #print(mean_shaps.shape)
+        #print(mean_abs_shaps.shape)
+
                                                                 

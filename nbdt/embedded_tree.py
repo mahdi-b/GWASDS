@@ -6,7 +6,10 @@ import tensorflow as tf
 from tensorflow.keras import Sequential, Model
 from tensorflow.keras.layers import Dense, Input
 from sklearn.cluster import ward_tree
+import shap
+import sys
 
+sys.setrecursionlimit(1000000)
 
 """
 The embedded decision tree in a NBDT. This is the tree that the featurized
@@ -56,34 +59,51 @@ class EmbeddedTree:
 
 
     # TODO comments
-    def soft_inf(self, x):
-        self.__soft_inference(x, 1.0, self.tree)
+    def soft_inf(self, x, interpret=False, background=None, sample=None, shaps=None):
+        self.__soft_inference(x, 1.0, self.tree, interpret, background, sample, shaps=shaps)
         prediction = []
         self.tree.get_leaf_probs(self.tree, prediction)
-        #print(prediction)
         prediction = sorted(prediction, key=lambda x: x[0])
         prediction = [x[1] for x in prediction]
-        #print('PREDICTION: ', prediction)
-        #print(sum(prediction))
         return tf.convert_to_tensor(prediction, dtype=tf.float32)
 
 
     # TODO comments
-    def __soft_inference(self, x, parent_prob, node):
+    def __soft_inference(self, x, parent_prob, node, interpret=False, background=None, sample=None, shaps=None):
         if node.is_leaf():
             return
         
         softmax_dist = node.soft_predict(x)
 
+        if interpret:
+            left_w = node.left.weight.reshape((node.left.weight.shape[0], 1))
+            right_w = node.right.weight.reshape((node.right.weight.shape[0], 1))
+            weights = np.concatenate((left_w, right_w), axis=1)
+            
+            # create new layer with one node and set the weights
+            node_layer = Dense(2, activation='softmax', use_bias=False)
+
+            # connect to backbone
+            backbone = Sequential(self.neural_backbone.layers)
+            backbone.add(node_layer)
+            backbone.layers[-1].set_weights(list(weights.reshape((1, weights.shape[0], weights.shape[1]))))
+            
+            # run DeepLIFT
+            e = shap.DeepExplainer(backbone, background)
+            shap_values = e.shap_values(sample, check_additivity=False)
+            shaps.append(np.sum(shap_values, axis=0) / 2.0)
+            #if len(shaps) == 0: shaps = np.sum(shap_values, axis=0) / 2.0
+            #else: shaps += (np.sum(shap_values, axis=0) / 2.0)
+            #print("TOP SNPs: (MAX: ", np.argmax(abs(shap_values[np.argmax(softmax_dist)])), ")")
+            
+
         # set path probabilities of each child
         node.right.path_prob = softmax_dist[1] * parent_prob
         node.left.path_prob = softmax_dist[0] * parent_prob
-        #print(node.weight)
 
         # recursive call on subtrees
-        self.__soft_inference(x, node.right.path_prob, node=node.right)
-        self.__soft_inference(x, node.left.path_prob, node=node.left)        
-
+        self.__soft_inference(x, node.right.path_prob, node=node.right, interpret=interpret, background=background, sample=sample, shaps=shaps)
+        self.__soft_inference(x, node.left.path_prob, node=node.left, interpret=interpret, background=background, sample=sample, shaps=shaps)        
 
 
     """
