@@ -74,6 +74,8 @@ class EmbeddedTree:
             return
         
         softmax_dist = node.soft_predict(x)
+        #print(softmax_dist)
+        path_next = np.argmax(softmax_dist)
 
         if interpret:
             left_w = node.left.weight.reshape((node.left.weight.shape[0], 1))
@@ -81,17 +83,25 @@ class EmbeddedTree:
             weights = np.concatenate((left_w, right_w), axis=1)
             
             # create new layer with one node and set the weights
-            node_layer = Dense(2, activation='softmax', use_bias=False)
+            node_layer = Dense(2, activation='softmax', use_bias=False, name='node_layer')
 
             # connect to backbone
             backbone = Sequential(self.neural_backbone.layers)
             backbone.add(node_layer)
-            backbone.layers[-1].set_weights(list(weights.reshape((1, weights.shape[0], weights.shape[1]))))
-            
+            backbone.get_layer('node_layer').set_weights(list(weights.reshape((1, weights.shape[0], weights.shape[1]))))
+            #backbone.layers[-1].set_weights(list(weights.reshape((1, weights.shape[0], weights.shape[1]))))
+            #print(backbone.summary())
+            #print("NODE OUTPUT TEST: ", backbone(sample))
             # run DeepLIFT
             e = shap.DeepExplainer(backbone, background)
-            shap_values = e.shap_values(sample, check_additivity=False)
-            shaps.append(np.sum(shap_values, axis=0) / 2.0)
+            
+            shap_values = e.shap_values(sample, check_additivity=True)
+            #shap_values = shap_values[path_next]
+            #shaps.append(np.absolute(shap_values))
+            #print(np.argmax(shaps))
+            shaps += (np.sum(np.absolute(shap_values), axis=0) / 2.0)
+            #shaps.append(np.sum(shap_values, axis=0) / 2.0) # This could be a memory issue
+
             #if len(shaps) == 0: shaps = np.sum(shap_values, axis=0) / 2.0
             #else: shaps += (np.sum(shap_values, axis=0) / 2.0)
             #print("TOP SNPs: (MAX: ", np.argmax(abs(shap_values[np.argmax(softmax_dist)])), ")")

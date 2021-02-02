@@ -39,7 +39,10 @@ class NBDT:
     def get_clusters(self):
         return self.tree.get_clusters()
 
-    def get_weights(self):
+    def get_weights(self, input_layer=False):
+        if input_layer:
+            #print(self.model.layers[1].weights)
+            return self.model.layers[1].weights[0].numpy().T
         return self.model.layers[-1].weights[0].numpy()
 
     """
@@ -108,7 +111,6 @@ class NBDT:
     The paper defines the loss function to be the Categorical Cross-entropy of the net outputs summed with a weighted 
     Categorical Crossentropy loss on the NBDT outputs.
     TODO docstring for arguments
-    TODO include number of classes
     """
     def train_network(self, dataset, test_data, test_data_size, loss_function, epochs, tree_loss_weight, opt, size, interpret=False):
         # Inference has to be done on the original network and the full NBDT
@@ -183,35 +185,42 @@ class NBDT:
             acc_avg.update_state(y, nbdt_pred)
             auc_avg.update_state(y, nbdt_pred.numpy().reshape((1, nbdt_pred.numpy().shape[0])))
             progress.update(total_samples, values=[('acc: ', acc_avg.result()), ('AUC: ', auc_avg.result())])
-        print("Accuracy: {:.3%}".format(acc_avg.result()))
-        print("AUC: {:.3%}".format(auc_avg.result()))
+        print()
+        print("Accuracy: {}".format(acc_avg.result()))
+        print("AUC: {}".format(auc_avg.result()))
         return acc_avg.result(), auc_avg.result()
 
 
-    def explain(self, background, samples, filename):
+
+    def explain(self, background, samples, save=True, filename=None):
         print("Running DeepLIFT on each node...")
         print("getting shapley values for prediction paths...")
         pred_i = 0
         progress = Progbar(target=samples.shape[0])
-        shaps = []
+        shaps = np.zeros((1, samples.shape[1]))
+        #shaps = []
         for sample in samples:
             progress.update(pred_i)
-            #print()
             x = sample.reshape((1, samples.shape[1]))
-            #print("Prediction ", pred_i, ": ")
-            pred = self.nbdt_predict(x, interpret=True, background=background, sample=x, shaps=shaps)
-            #print("NBDT OUTPUT: ", np.argmax(pred))
+            self.nbdt_predict(x, interpret=True, background=background, sample=x, shaps=shaps)
             pred_i += 1
         
-        shaps = np.array(shaps)
-        mean_shaps = np.sum(shaps, axis=0) / shaps.shape[0]
-        #mean_shaps = shaps / (pred_i)
-        mean_abs_shaps = abs(mean_shaps)
-        print(mean_abs_shaps)
+        #shaps = np.array(shaps)
+        #print(shaps)
+        mean_abs_shaps = shaps / pred_i
+        #mean_abs_shaps = abs(mean_shaps)
+        #print(mean_abs_shaps)
         df = pd.DataFrame(mean_abs_shaps)
+        #shaps = np.array(shaps)
+        #shaps = shaps.reshape((shaps.shape[0], shaps.shape[2]))
+        #print(shaps.shape)
+        #df = pd.DataFrame(shaps)
+        #df.columns = ['SNP_' + str(i) for i in range(shaps.shape[1])]
+        print(mean_abs_shaps.shape)
         df.columns = ['SNP_' + str(i) for i in range(mean_abs_shaps.shape[1])]
-        if filename != None:
+        if save:
             df.to_csv(filename)
+
         return df
 
         #print(shaps.shape)

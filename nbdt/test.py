@@ -2,14 +2,14 @@
 # file for running tests for NBDT class
 import sklearn
 import tensorflow as tf
-#import tensorflow_datasets as tfds
+import matplotlib.pyplot as plt
 from tensorflow.keras import datasets
 from tensorflow.keras import layers
 from tensorflow.keras import Model, Sequential
 from tensorflow.keras import Input
 from tensorflow.keras.optimizers import RMSprop, Adam
 from tensorflow.keras.metrics import AUC
-from tensorflow.keras.regularizers import L1
+from tensorflow.keras.regularizers import l1_l2
 from model import NBDT
 import numpy as np
 import pandas as pd
@@ -188,10 +188,11 @@ def simulated_snp_test():
                       )
 
 
-def simulated_snp_test_multi(filename, shap_file):
-    snps = pd.read_csv(filename, dtype='uint8')
-
-    #print(snps.columns)
+def simulated_snp_test_multi(snps, arch, L1_coef=0.1, net_epochs=10, plot=False):
+    #snps = pd.read_csv(filename, dtype='uint8')
+    print()
+    print("MODEL: ", arch[0], "===", arch[1])
+    print("L1: ", L1_coef)
     X = snps[snps.columns[1:-1]].values
     y = pd.get_dummies(snps['CLASS']).values    
     print(X)
@@ -204,29 +205,34 @@ def simulated_snp_test_multi(filename, shap_file):
     print('TRAINING NEURAL NET...')
     print('---------------------------------------------------------')
     inputs = Input(shape=(x_tr.shape[1],))
-    h = layers.Dense(64, kernel_regularizer=L1(), activation='relu')(inputs)
-    h = layers.Dense(256, kernel_regularizer=L1(), activation='relu')(h)
+    #h = layers.Dense(arch[0], activation='relu')(inputs)
+    #h = layers.Dense(arch[1], activation='relu')(h)
+    #h = layers.BatchNormalization()(h)
+    h = layers.Dense(arch[0], kernel_regularizer=l1_l2(l1=L1_coef, l2=0), activation='relu')(inputs)
+    h = layers.Dense(arch[1], activation='relu')(h)
+    #h = layers.BatchNormalization()(h)
+    #h = layers.Dense(arch[2], activation='relu')(h)
+    #h = layers.Dense(arch[3], activation='relu')(h)
     output = layers.Dense(y_tr.shape[1], activation='softmax')(h)
     model = Model(inputs=inputs, outputs=output)
 
-    opt = RMSprop(learning_rate=0.00001)
+    opt = Adam(learning_rate=1e-4)
     model.compile(optimizer=opt, 
               loss='categorical_crossentropy', 
               metrics=['acc', AUC()],
              )
 
-    model.fit(x_tr, y_tr, batch_size=128, epochs=20, validation_split=0.3)
-    loss, acc, auc = model.evaluate(x_te, y_te)
-    print('TEST LOSS: ', loss)
-    print('TEST ACC: ', acc)
-    print('TEST AUC: ', auc)
-    print()
+    model.fit(x_tr, y_tr, batch_size=128, epochs=net_epochs, verbose=1, validation_split=0.3)
+    loss, net_acc, net_auc = model.evaluate(x_te, y_te)
+    print('TEST LOSS: {:.4} TEST ACC {:.4%} TEST AUC {:.4%}'.format(loss, net_acc, net_auc))
+    
     print()
     print('NEURAL-BACKED DECISION TREE')
     print('--------------------------------------------------------')
     print('BUILDING NBDT')
     nbdt = NBDT(model)
     print()
+
     print('TRAINING')
 
     test_dataset = tf.data.Dataset.from_tensor_slices((x_te, y_te))
@@ -249,10 +255,34 @@ def simulated_snp_test_multi(filename, shap_file):
     #nbdt.evaluate(train_dataset.batch(1), size=x_tr.shape[0])
     print('--------------------------------------------------------')
     print('TESTING')
-    nbdt.evaluate(test_dataset.batch(1), size=x_te.shape[0])
-    #print(nbdt.get_clusters())
-    mean_shaps = nbdt.explain(background=x_te, samples=x_te[:10], filename=shap_file)
-    print(mean_shaps)
+    acc, auc = nbdt.evaluate(test_dataset.batch(1), size=x_te.shape[0])
+
+    background = X[np.random.choice(X.shape[0], size=2000, replace=False)]
+    samples = x_te[np.random.choice(x_te.shape[0], size=100, replace=False)]
+
+    e = shap.DeepExplainer(model, background)
+    shap_values = np.array(e.shap_values(samples, check_additivity=True))
+    shap_values = np.sum(np.absolute(shap_values)/shap_values.shape[1], axis=1)
+
+    model_shaps_file = "sim_{}_{}c_model_shaps_{}_l1-{:.3}_acc-{:.3}_auc-{:.3}_netacc-{:.3}_netauc{:.3}.csv".format(y.shape[0], y.shape[1], arch[0], L1_coef, acc, auc, net_acc, net_auc)
+
+    model_shaps = pd.DataFrame(shap_values)
+    model_shaps.to_csv(model_shaps_file)
+
+    nbdt_shaps_file = "sim_{}_{}c_shaps_{}_l1-{:.3}_acc-{:.3}_auc-{:.3}.csv".format(y.shape[0], y.shape[1], arch[0], L1_coef, acc, auc)
+    nbdt.explain(background=background, samples=samples, filename=nbdt_shaps_file)
+
+    if plot:
+        plt.figure()
+        w = nbdt.get_weights().T
+        #d = pdist(w, 'euclidean')
+        clusters = linkage(w, method='ward', metric='euclidean')
+        dendrogram(clusters)
+        fname = "dendro_{}c_{}_l1-{:.3}_acc-{:.3}_auc-{:.3}.png".format(y.shape[1], arch[0], L1_coef, acc, auc)
+        print("NBDT TREE FILE SAVED")
+        print(nbdt.tree.get_clusters())
+        plt.savefig(fname)
+    #print(mean_shaps)
 
 
 def clustering_test(filename):
@@ -328,11 +358,27 @@ def deeplift_test(data_file, fst_file, top_n_snps=10):
 
 
 # ---------------------- TESTS -----------------------
-#deeplift_test('genotypes_test.csv', 'class_fsts.csv')
-#deeplift_test('trivial_test_data2.csv', None)
-#deeplift_test('deep_gwas_sim_3c.csv', None)
-simulated_snp_test_multi('deep_gwas_sim_3c.csv', 'deep_gwas_sim_3c_shaps_l10.01.csv')
-#simulated_snp_test_multi('deep_gwas_sim_5c.csv', 'deep_gwas_sim_5c_shaps_l10.01.csv')
 
-#plt.plot(dend)
-#plt.show()
+arch1 = [1024, 512]
+arch2 = [256, 512]
+arch3 = [1000, 1000, 512, 256]
+arch4 = [128, 256]
+arch0 = [64, 256]
+
+#snps_5k_5c = pd.read_csv('deep_gwas_sim_5k_5c.csv')
+#snps_2k_5c = pd.read_csv('deep_gwas_sim_2k_5c.csv')
+snps_8k_5c = pd.read_csv('deep_gwas_sim_8k_5c.csv')
+
+#simulated_snp_test_multi(snps_2k_5c, arch0, L1_coef=0.0, plot=False)
+#simulated_snp_test_multi(snps_2k_5c, arch4, L1_coef=0.0, plot=False)
+#simulated_snp_test_multi(snps_2k_5c, arch2, L1_coef=0.0, plot=False)
+
+#simulated_snp_test_multi(snps_5k_5c, arch0, L1_coef=0.0, plot=False)
+#simulated_snp_test_multi(snps_5k_5c, arch4, L1_coef=0.0, plot=False)
+#simulated_snp_test_multi(snps_5k_5c, arch2, L1_coef=0.0, plot=False)
+
+simulated_snp_test_multi(snps_8k_5c, arch0, L1_coef=0.1, net_epochs=20, plot=False)
+#simulated_snp_test_multi(snps_8k_5c, arch4, L1_coef=0.0, plot=False)
+#simulated_snp_test_multi(snps_8k_5c, arch2, L1_coef=0.0, plot=False)
+
+
