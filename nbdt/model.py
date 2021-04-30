@@ -152,21 +152,23 @@ class NBDT:
                                             ('acc:', epoch_acc_avg.result()),
                                         ])
                
-            training_loss_results.append(epoch_loss_avg.result().numpy())
+            #training_loss_results.append(epoch_loss_avg.result().numpy())
             print()
             print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(epoch,
                                                                 epoch_loss_avg.result(),
                                                                 epoch_acc_avg.result()),
                                                                 )
 
-            if epoch_acc_avg.result() >= .90:
-                test_acc = self.evaluate(test_data.batch(1), size=test_data_size)
-                if test_acc >= .90:
-                    print("SAVING MODEL")
-                    self.model.save("nn_nbdt_test_acc-{:.3f}_epoch-{:03d}_adam".format(test_acc, epoch))
+            test_acc, test_auc = self.evaluate(test_data.batch(1), size=test_data_size)
+            print('VAL ACC: {:.3%} VAL AUC: {:.3}'.format(test_acc, test_auc))
+            """
+            if test_acc >= .90:
+                print("SAVING MODEL")
+                self.model.save("nn_nbdt_test_acc-{:.3f}_epoch-{:03d}_adam".format(test_acc, epoch))
 
             print()
             self.model.save("nn_nbdt_epoch-{:03d}_adam".format(epoch))
+            """
 
         return training_loss_results
 

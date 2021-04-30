@@ -23,11 +23,18 @@ class EmbeddedTree:
     Arguments:
     weight_matrix (numpy array): This is the weights of the final FC layer in the model.
     """
-    def __init__(self, weight_matrix, neural_net):
+    def __init__(self, weight_matrix, neural_net, input_contribs=False):
         self.neural_backbone = Model(inputs=neural_net.input, 
                                      outputs=neural_net.layers[len(neural_net.layers)-2].output)
         #print(self.neural_backbone.summary())
-        self.tree = self.__build_tree(weight_matrix)
+        self.leaves = []
+        w = weight_matrix
+        for i in range(w.shape[1]):
+            e_norm = np.sqrt(sum(w[:, i] ** 2))
+            self.leaves.append(TreeNode((w[:, i] / e_norm), None, None, i))
+        
+        self.tree = self.__cluster(self.leaves)
+        #self.tree = self.__build_tree(weight_matrix)
     
 
     """
@@ -127,16 +134,45 @@ class EmbeddedTree:
             best_sim = clusters[0].similarity(clusters[1])
             node1 = clusters[0]
             node2 = clusters[1]
+            print('BEST SIM SET: ', best_sim)
 
             for i in range(len(clusters)):
                 for j in range(i+1, len(clusters)):
+                    i_cluster = []
+                    j_cluster = []
+                    clusters[i].get_leaves(clusters[i], [], i_cluster)
+                    clusters[j].get_leaves(clusters[j], [], j_cluster)
+                    print('COMPARING CLUSTERS: ', (i_cluster, j_cluster))
                     sim_i_j = clusters[i].similarity(clusters[j])
-                    if sim_i_j < best_sim:
+                    print('SIMILARITY: {:.4}'.format(sim_i_j))
+                    if sim_i_j <= best_sim:
+                        print('===NEW BEST SIMILARITY FOUND! SET TO {:.4}==='.format(sim_i_j))
                         best_sim = sim_i_j
                         node1 = clusters[i]
                         node2 = clusters[j]
             
-            parent_weights = (node1.weight + node2.weight) / 2.0
+            
+            node1_classes = []
+            node2_classes = []
+
+            node1_weights = []
+            print('COMBINING NODES...')
+            node1.get_leaves(node1, node1_weights, node1_classes)
+            print("NODE 1 SUBTREE: ")
+            print(node1_classes)
+            node2_weights = []
+            node2.get_leaves(node2, node2_weights, node2_classes)
+            print('NODE 2 SUBTREE: ')
+            print(node2_classes)
+            print()
+            nu_leaves = len(node2_weights) + len(node1_weights)
+            print('NU OF LEAVES: ', nu_leaves)
+            print()
+            #print(sum(node1_weights))
+            parent_weights = (sum(node1_weights) + sum(node2_weights)) / nu_leaves
+            #print(parent_weights)
+
+            #parent_weights = (node1.weight + node2.weight) / 2.0
             parent_node = TreeNode(weights=parent_weights,
                                    right_child=node1,
                                    left_child=node2,
@@ -146,6 +182,7 @@ class EmbeddedTree:
             clusters.remove(node1)
             clusters.remove(node2)
 
+        print('CLUSTERS: ', len(clusters))
         return clusters[0]
 
 
@@ -170,12 +207,13 @@ class EmbeddedTree:
             children = []
             for el in pair:
                 if el < n_samples:
-                    tree_nodes[el] = TreeNode(weights=w[el],
+                    norm_weight = w[el] / np.linalg.norm(w[el], ord=2)
+                    tree_nodes[el] = TreeNode(weights=norm_weight,
                                               right_child=None,
                                               left_child=None,
                                               class_idx=el,
                                               )
-                    w_list.append(w[el])
+                    w_list.append(norm_weight)
                 else:
                     w_list.append(tree_nodes[el].weight)
 

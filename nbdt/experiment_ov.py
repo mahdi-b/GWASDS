@@ -14,31 +14,34 @@ from model import NBDT
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from neural_interaction_detection import get_interactions
-from pyensembl import EnsemblRelease
+#from neural_interaction_detection import get_interactions
+#from pyensembl import EnsemblRelease
 from scipy.stats import zscore
 from scipy.stats import norm
 import sys
 
+# TODO
+# Use autoencoder and cluster embeddings of genes, see if they change upon retraining
+# Use clusters to see which classes are related
+# Create a neural network for each class and train
+# Use NID to get interactions and significant genes
+# compare these interactions and genes with related classes
+
 seed = int(sys.argv[1])
 tf.random.set_seed(seed)
 
-gene_db = EnsemblRelease(77)
+#gene_db = EnsemblRelease(77)
 #import wandb
 
 #wandb.init(project='capstone', entity='nimuh', sync_tensorboard=True)
 
-#FILE = 'cancers_gene_exps.csv'
-FILE = 'full_ov_genotypes.npy'
-train_file = 'cancer_snps.npy'
-train_outs = 'cancers.npy'
-NBDT_LR = 1e-5
-LR = 1e-4
-BATCH = 128
-EPOCHS = 30
-VAL_SPLIT = 0.3
-arch = [4096, 2048, 1024, 512, 128, 64]
-L1_coef = 0.0001
+NBDT_LR = 1e-7
+LR = 1e-5
+BATCH = 256
+EPOCHS = 100
+VAL_SPLIT = 0.4
+arch = [128, 64, 32, 16]
+L1_coef = 0.001
 Drop_factor = 0.5
 tree_weight = 0.1
 MAX_INTERS = 5000
@@ -52,30 +55,31 @@ reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_acc',
 
 # Read in data
 snps = np.load('full_ov_genotypes.npy')
+#print(snps[3][2046])
+#vals, counts = np.unique(snps, return_counts=True)
+r, c = np.where(snps > 2)
+print(np.unique(c, return_counts=True))
+snps = np.delete(snps, c, 1)
+print(snps.shape)
+#print(counts.shape)
+snps[snps > 2] = 0
 histo = np.load('histotypes.npy')
-"""
-X = np.load('norm_gene_exps.npy')
-
-y_brca = np.load('y_brca.npy')
-y_kirc = np.load('y_kirc.npy')
-y_luad = np.load('y_luad.npy')
-y_skcm = np.load('y_skcm.npy')
-y_ucec = np.load('y_ucec.npy')
-"""
-#data = pd.read_csv('cancers_gene_exps.csv')
-#gene_ids = data.columns[1:-1]
-#del data
-
-#x_tr = np.load(train_file)
-#y_tr = np.load(train_outs)
+histo = pd.get_dummies(histo).values
 
 print(snps.shape)
 print(histo.shape)
-#y_tr = pd.get_dummies(y_tr).values
 
-x_val = np.load('gene_exps_val.npy')
-y_val = np.load('cancers_val.npy')
-#y_val = pd.get_dummies(y_val).values
+snps_tr, snps_val, y_tr, y_val = train_test_split(snps, histo, test_size=0.4, shuffle=True)
+snps_val, snps_te, y_val, y_te = train_test_split(snps_val, y_val, test_size=0.5, shuffle=True)
+
+_, tr_class_dist = np.unique(y_tr, return_counts=True)
+_, val_class_dist = np.unique(y_val, return_counts=True)
+_, te_class_dist = np.unique(y_te, return_counts=True)
+
+
+print('TRAIN CLASS DIST: ', tr_class_dist)
+print('VAL CLASS DIST:   ', val_class_dist)
+print('TEST CLASS DIST:  ', te_class_dist)
 
 cancer_dict = {'brca': 0, 
                'ucec': 1,
@@ -91,23 +95,17 @@ cancer_dict_inv = {0: 'brca',
                    }
 
 #cancers = data.CANCER.map(cancer_dict)
-#outputs = pd.get_dummies(cancers).values
-
-#snps = data[data.columns[2:-1]].values
-#print(outputs.shape)
-#print(snps.shape)
-#print(snps)
 
 print('==== DATA ====')
 print()
-print('X Features: ', x_tr.shape[1])
-print('Y: ', y_tr.shape[1])
+print('X Features: ', snps.shape[1])
+print('Y:          ', histo.shape[1])
 print()
 print('==== PARAMS ====')
 #print('===> SEED: ', seed)
-print('===> LR: ', LR)
+print('===> LR:     ', LR)
 print('===> EPOCHS: ', EPOCHS)
-print('===> L1: ', L1_coef)
+print('===> L1:     ', L1_coef)
 print('===> BATCH SIZE: ', BATCH)
 print('===> GETTING {} INTERACTIONS'.format(MAX_INTERS))
 print('=======================')
@@ -117,7 +115,7 @@ print()
 print('CREATING NEURAL NET')
 # Initial model
 opt = Adam(learning_rate=LR)
-inputs = Input(shape=(x_tr.shape[1],))
+inputs = Input(shape=(snps.shape[1],))
 h = layers.Dense(arch[0], kernel_regularizer=l1_l2(l1=L1_coef, l2=0.0), activation='relu')(inputs)
 h = layers.BatchNormalization()(h)
 h = layers.Dense(arch[1], activation='relu')(h)
@@ -125,9 +123,9 @@ h = layers.BatchNormalization()(h)
 h = layers.Dense(arch[2], activation='relu')(h)
 h = layers.BatchNormalization()(h)
 h = layers.Dense(arch[3], activation='relu')(h)
-h = layers.BatchNormalization()(h)
-h = layers.Dense(arch[4], activation='relu')(h)
-output = layers.Dense(y_tr.shape[1], activation='softmax')(h)
+#h = layers.BatchNormalization()(h)
+#h = layers.Dense(arch[4], activation='relu')(h)
+output = layers.Dense(histo.shape[1], activation='softmax')(h)
 model = Model(inputs=inputs, outputs=output)
 
 model.compile(optimizer=opt,
@@ -135,16 +133,18 @@ model.compile(optimizer=opt,
               metrics=['acc', AUC(), Recall(), Precision()],
               )
 
-model.fit(x_tr, 
+model.fit(snps_tr, 
           y_tr, 
           batch_size=BATCH, 
           epochs=EPOCHS,
-          validation_data=(x_val, y_val), 
+          validation_data=(snps_val, y_val), 
           verbose=1,
           )
             
 print('DONE TRAINING DNN')
 print()
+print('=== EVAL on TEST SET: ===')
+model.evaluate(snps_te, y_te)
 #print('Class weights: ', model.layers[-1].weights[0].numpy().shape)
 #np.save('class_weights_2', model.layers[-1].weights[0].numpy().T)
 #model.evaluate(snps_te, y_te)
@@ -152,6 +152,7 @@ print()
 # Compute input contributions with respect to each class
 #print(model.weights)
 
+"""
 learned_weights = []
 learned_weights_nid = []
 learned_weights_rev = []
@@ -242,6 +243,7 @@ for c in range(agg_w.shape[1]):
 #print(agg_w.shape)
 #print(agg_w_rev.shape)
 """
+"""
 print('PLOTTING TREE...')
 
 plt.figure(figsize=(15,30))
@@ -255,33 +257,33 @@ fname = "dendro_class_contrib_" + sys.argv[1]
 #print(nbdt.tree.get_clusters())
 plt.savefig(fname)
 
-
+"""
 print('====')
 print('BUILDING NBDT')
 
 # NBDT
-#train_dataset = tf.data.Dataset.from_tensor_slices((snps_tr, y_tr))
-val_dataset = tf.data.Dataset.from_tensor_slices((x_val, y_val))
-#test_dataset = tf.data.Dataset.from_tensor_slices((snps_te, y_te))
+train_dataset = tf.data.Dataset.from_tensor_slices((snps_tr, y_tr))
+val_dataset = tf.data.Dataset.from_tensor_slices((snps_val, y_val))
+test_dataset = tf.data.Dataset.from_tensor_slices((snps_te, y_te))
 
 nbdt = NBDT(model)
 loss_fn = tf.keras.losses.CategoricalCrossentropy()
-"""
-"""
+
+
 print('===NBDT TRAINING===')
 nbdt.train_network(train_dataset, 
                    val_dataset,
                    test_data_size=snps_val.shape[0], 
                    loss_function=loss_fn, 
-                   epochs=1, 
+                   epochs=5, 
                    tree_loss_weight=tree_weight, 
                    opt=tf.keras.optimizers.Adam(learning_rate=NBDT_LR), 
-                   size=y_tr.shape[0],
+                   size=snps_tr.shape[0],
                    )
 
 print('===NBDT EVALUATE===')
-#acc, auc = nbdt.evaluate(val_dataset.batch(1), size=snps_val.shape[0])
-acc, auc = nbdt.evaluate(test_dataset.batch(1), size=snps_te.shape[0])
+acc, auc = nbdt.evaluate(test_dataset.batch(1), size=snps_val.shape[0])
+#acc, auc = nbdt.evaluate(train_dataset.batch(1), size=snps.shape[0])
 print('===================')
 
 #print('LAST LAYER WEIGHTS===')
@@ -292,11 +294,11 @@ print('===================')
 
 
 # get cluster indices
-groups = nbdt.tree.get_clusters()
-print(groups)
+#groups = nbdt.tree.get_clusters()
+#print(groups)
 
 #np.save('groups_acc-{:.3}_seed-{}'.format(acc, seed), np.array(groups))
-"""
+
 """
 g1 = groups[0]
 g2 = groups[1]

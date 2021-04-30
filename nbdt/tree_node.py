@@ -43,13 +43,14 @@ class TreeNode:
     leaves (list): List of TreeNodes. These are the leaves found.
 
     """
-    def get_leaves(self, node, leaves):
+    def get_leaves(self, node, leaves, classes):
         if node.is_leaf():
             leaves.append(node.weight)
+            classes.append(node.class_idx)
             return
         
-        self.get_leaves(node.right, leaves)
-        self.get_leaves(node.left, leaves)
+        self.get_leaves(node.right, leaves, classes)
+        self.get_leaves(node.left, leaves, classes)
     
 
 
@@ -98,9 +99,10 @@ class TreeNode:
     def similarity(self, node, d_type='euclidean'):
         sim = 0
         if d_type == 'euclidean':
-            diff_sq = (self.weight - node.weight)
-            diff_sq = dot(diff_sq, diff_sq)
+            diff_sq = sum(self.weight - node.weight) ** 2
+            #diff_sq = dot(diff_sq, diff_sq)
             sim = sqrt(diff_sq)
+            #print(sim)
         return sim
 
 
